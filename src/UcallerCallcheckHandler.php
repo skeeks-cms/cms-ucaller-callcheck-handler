@@ -50,7 +50,7 @@ class UcallerCallcheckHandler extends CallcheckHandler
     public function attributeLabels()
     {
         return ArrayHelper::merge(parent::attributeLabels(), [
-            'api_key' => "Секретный ключ сервиса",
+            'api_key'    => "Секретный ключ сервиса",
             'service_id' => "ID сервиса",
 
         ]);
@@ -94,11 +94,11 @@ class UcallerCallcheckHandler extends CallcheckHandler
     public function callcheck($phone)
     {
         $queryString = http_build_query([
-            'key'     => $this->api_key,
-            'service_id'      => $this->service_id,
+            'key'        => $this->api_key,
+            'service_id' => $this->service_id,
             'phone'      => $phone,
-            'ip'         => \Yii::$app->request->userIP,
-            'mix' => 1,
+            'unique'     => \Yii::$app->security->generateRandomString(),
+            'mix'        => 'true',
         ]);
 
         $url = 'https://api.ucaller.ru/v1.0/initCall?'.$queryString;
@@ -111,7 +111,10 @@ class UcallerCallcheckHandler extends CallcheckHandler
             ->setUrl($url)
             ->send();
 
+        \Yii::info("api request: " . $url, self::class);
+
         if (!$response->isOk) {
+            \Yii::error("error request: {$url} " . $response->content, self::class);
             throw new Exception($response->content);
         }
 
@@ -125,18 +128,25 @@ class UcallerCallcheckHandler extends CallcheckHandler
      */
     public function callcheckMessage(CmsCallcheckMessage $callcheckMessage)
     {
-        $data = $this->callcheck($callcheckMessage->phone);
+        $formatedPhone = $callcheckMessage->phone;
+
+        $formatedPhone = str_replace("-", "", $formatedPhone);
+        $formatedPhone = str_replace("+", "", $formatedPhone);
+        $formatedPhone = str_replace(" ", "", $formatedPhone);
+        $formatedPhone = str_replace("&nbsp;", "", $formatedPhone);
+
+        $data = $this->callcheck($formatedPhone);
 
         $callcheckMessage->provider_response_data = (array)$data;
         $callcheckMessage->provider_status = (string)ArrayHelper::getValue($data, 'status');
-        $callcheckMessage->provider_call_id = (string)ArrayHelper::getValue($data, 'call_id');
+        $callcheckMessage->provider_call_id = (string)ArrayHelper::getValue($data, 'unique_request_id');
 
-        if (ArrayHelper::getValue($data, 'status') == "OK") {
+        if ((bool)ArrayHelper::getValue($data, 'status') === true) {
             $callcheckMessage->status = CmsCallcheckMessage::STATUS_OK;
-            $callcheckMessage->code = (string) ArrayHelper::getValue($data, 'code');
+            $callcheckMessage->code = (string)ArrayHelper::getValue($data, 'code');
         } else {
             $callcheckMessage->status = CmsCallcheckMessage::STATUS_ERROR;
-            $callcheckMessage->error_message = ArrayHelper::getValue($data, 'status_text');
+            $callcheckMessage->error_message = ArrayHelper::getValue($data, 'error');
         }
 
         return true;
